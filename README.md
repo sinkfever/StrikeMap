@@ -1,4 +1,6 @@
-Optiflow is a Python project for studying options market activity and positioning using live data from the Schwab API (via schwab-py). It is organized around a shared data pipeline, with analysis modules built on top of it.
+# StrikeMap
+
+StrikeMap is a Python project for studying options market activity and positioning using live data from the Schwab API (via schwab-py). It is organized around a shared data pipeline, with analysis modules built on top of it.
 
 # Modules
 
