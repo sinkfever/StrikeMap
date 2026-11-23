@@ -1,8 +1,16 @@
 from dotenv import load_dotenv
 from schwab.auth import easy_client
 
+import dash
+from dash import Dash, dcc, html, Input, Output, State, callback
+import plotly
+import plotly.express as px
+
 import datetime
+import numpy as np
+import pandas as pd
 import os
+import time
 
 load_dotenv()
 
@@ -26,34 +34,71 @@ def pull_option_chain(client, ticker, side = CALL, strike_count = 40, from_date 
     ).json()
 
 test_pull = pull_option_chain(client, 'SPY')
+# print(test_pull)
 
-def get_option_prop(chain, prop, side):
+def get_option_data(data, side, single_data=False, strike_target=0):
+    chain = pull_option_chain(client, 'SPY')
     data_points = dict()
     if side == 'c':
         for date in chain['callExpDateMap']:
             for strike in chain['callExpDateMap'][date]:
-                data_points[float(strike)] = chain['callExpDateMap'][date][strike][0][prop]
-
+                if strike_target == 0:
+                    if single_data:
+                       return float(chain['callExpDateMap'][date][strike][0][data])
+                    data_points[float(strike)] = chain['callExpDateMap'][date][strike][0][data]
+                else:
+                    if float(strike) == strike_target:
+                        if single_data:
+                            return float(chain['callExpDateMap'][date][strike][0][data])
+                        data_points[float(strike)] = chain['callExpDateMap'][date][strike][0][data]
     return data_points
-
-data = get_option_prop(test_pull, 'totalVolume', 'c')
-print(data)
 
 
 # Options Volume Flow
-# Purpose: 
-#   This idea attempts to show where option activity is currently active in real time, 
-#   by taking the nth second's volume of a certain strike, then subtracting the nth second's volume from 
-#   (n+1)th second's volume, to get the change of volume from the previous second to the current second 
-# Example:
-#   12:01:00 PM, SPY Volume at 750 = 85000
-#   12:01:01 PM, SPY Volume at 750 = 86000
-#   Options Volume RoC = (86000 - 85000) / (1 - 0) = 1000
-# Implementation:
-#   Gather data to figure out the range of "normal" RoC variance, then define anything outside of the variance
-#       to be unusual activity. Volume RoC can help us figure out where trading activity is currently located. 
-#       Consider this tool as a location tool.
-# Hypothesis:
-#   Sudden spike in volume flow at a strike that's on OTM on either tail can signify a potential move towards
-#       that direction.
-# Verdict: To be tested
+# To scale up to multiple strikes instead of one, a dictionary should be returned
+# Set a dictionary to be the previous volume set, if none exists yet, set the current as previous
+# Get the new set of volume data in the next second, then use NumPy operations to subtract the difference
+#   between the new and old volume data 
+# DO NOT make the strike axis dynamic, as it can shift between each data set.
+
+
+app = dash.Dash(__name__)
+app.layout = html.Div(
+        [
+            dcc.Graph(id = 'graph'),
+            dcc.Interval(
+                id = 'interval-component',
+                interval = 1500,
+                n_intervals = 0
+            ),
+            dcc.Store(id='prev-volume', storage_type='local')
+        ]
+)
+
+@app.callback(
+        Output('graph', 'figure'),
+        Output('prev-volume', 'data'),
+        Input('interval-component', "n_intervals"),
+        State('prev-volume', 'data')
+)
+
+def update_graph(n, prev_volume):
+    data = dict()
+    if prev_volume is None:
+        prev_volume = get_option_data(data='totalVolume', side='c')
+    else:
+        current_volume = get_option_data(data='totalVolume', side='c')
+        rate_of_change = np.subtract(list(current_volume.values()), list(prev_volume.values())).tolist()
+        prev_volume = current_volume
+        print(rate_of_change)
+        print('Average Volume ROC:', np.average(rate_of_change), 'contracts per second')
+        data = dict(zip(current_volume.keys(), rate_of_change))
+    df = pd.DataFrame({
+        "strike": list(data.keys()),
+        "value": list(data.values()),
+    })
+    return px.bar(df, x="strike", y="value", range_y=[0, 500]), prev_volume
+
+
+if __name__ == '__main__':
+    app.run(debug=True)
